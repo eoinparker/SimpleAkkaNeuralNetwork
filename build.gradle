@@ -9,7 +9,7 @@ version = '1.0-SNAPSHOT'
 
 ext {
   scalaMajorVersion = '2.11'
-  scalaVersion = "${scalaMajorVersion}.7"
+  scalaVersion = "${scalaMajorVersion}.8"
 }
 
 repositories {
@@ -24,6 +24,8 @@ dependencies {
 
   compile "org.scala-lang:scala-library:${scalaVersion}"
   compile "org.scala-lang:scala-reflect:${scalaVersion}"
+  compile "com.typesafe.akka:akka-actor_${scalaMajorVersion}:2.4.12"
+  compile "org.spire-math:spire_${scalaMajorVersion}:0.11.0"
 
   // ------------------------------------------------------------
   // Misc. libraries
