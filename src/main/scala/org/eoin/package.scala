@@ -1,5 +1,6 @@
 package org
 
+import akka.actor.DiagnosticActorLogging
 import org.apache.logging.log4j.LogManager
 
 /**
@@ -8,5 +9,7 @@ import org.apache.logging.log4j.LogManager
 package object eoin {
 
   val logger = LogManager.getLogger(this.getClass.getCanonicalName)
+
+  type LoggingToUse = DiagnosticActorLogging
 
 }

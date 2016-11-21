@@ -25,6 +25,7 @@ dependencies {
   compile "org.scala-lang:scala-library:${scalaVersion}"
   compile "org.scala-lang:scala-reflect:${scalaVersion}"
   compile "com.typesafe.akka:akka-actor_${scalaMajorVersion}:2.4.12"
+  compile "com.typesafe.akka:akka-contrib_${scalaMajorVersion}:2.4.12"
   compile "org.spire-math:spire_${scalaMajorVersion}:0.11.0"
 
   // ------------------------------------------------------------
