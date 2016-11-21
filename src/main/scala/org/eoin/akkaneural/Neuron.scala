@@ -1,8 +1,8 @@
 package org.eoin.akkaneural
 
-import akka.actor.{Actor, ActorRef, Stash}
+import akka.actor.{Actor, ActorLogging, ActorRef, Stash}
+import akka.event.LoggingReceive
 import akka.routing.{BroadcastRoutingLogic, Router}
-import org.eoin.LoggingToUse
 import spire.implicits._
 import spire.math._
 
@@ -17,7 +17,7 @@ case class NeuronRemoved(ref: ActorRef) extends NeuronMessage
 
 
 class Neuron ( val interLayerRouter: ActorRef, /*val myIndex: Int, val myLayerIndex : Int, */
-               val activationFn: Real=>Real) extends Actor with Stash with LoggingToUse {
+               val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
 
   // TODO vars - context.become
   var biasTerm: Real = 1/2
@@ -26,7 +26,7 @@ class Neuron ( val interLayerRouter: ActorRef, /*val myIndex: Int, val myLayerIn
   //var routerToNextLayer = Router(BroadcastRoutingLogic(), Vector.empty)
 
 
-  override def receive: Receive = {
+  override def receive: Receive = LoggingReceive {
 
     //case NeuronConnected(actorRef) => routerToNextLayer = routerToNextLayer.addRoutee(actorRef)
     //case NeuronDisconnected(actorRef) => routerToNextLayer = routerToNextLayer.removeRoutee(actorRef)
@@ -51,7 +51,7 @@ class Neuron ( val interLayerRouter: ActorRef, /*val myIndex: Int, val myLayerIn
 
 }
 
-class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with Stash with LoggingToUse {
+class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with Stash with ActorLogging {
 
   var routerToNextLayer = Router(BroadcastRoutingLogic(), Vector.empty) // TODO var
   var previousLayerNeurons = List.empty[ActorRef]
@@ -59,7 +59,7 @@ class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with St
   override def receive = handle(List.empty)
 
 
-  def handle(feedForwardOutputsReceived: List[ (ActorRef,Real)] ): Receive = {
+  def handle(feedForwardOutputsReceived: List[ (ActorRef,Real)] ): Receive = LoggingReceive {
 
     case NeuronAdded(actorRef,true) => routerToNextLayer = routerToNextLayer.addRoutee(actorRef)
     case NeuronAdded(actorRef,false) => previousLayerNeurons = actorRef :: previousLayerNeurons
@@ -83,11 +83,11 @@ class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with St
   }
 }
 
-class NetworkEntryPoint extends Actor with Stash with LoggingToUse {
+class NetworkEntryPoint extends Actor with Stash with ActorLogging {
 
   var inputLayerNeurons = List.empty[ActorRef]
 
-  override def receive : Receive = {
+  override def receive : Receive =  LoggingReceive {
     case NeuronAdded(actorRef,true) => inputLayerNeurons = actorRef :: inputLayerNeurons
     case FeedForwardInput (values) =>
       require (inputLayerNeurons.size == values.size) //TODO
@@ -99,11 +99,11 @@ class NetworkEntryPoint extends Actor with Stash with LoggingToUse {
 
 }
 
-class NetworkExitPoint extends Actor with Stash with LoggingToUse {
+class NetworkExitPoint extends Actor with Stash with ActorLogging {
 
    var outputLayerNeurons = List.empty[ActorRef]
 
-  override def receive : Receive = {
+  override def receive : Receive = LoggingReceive {
     case NeuronAdded(actorRef,false) => outputLayerNeurons = actorRef :: outputLayerNeurons
     case f @ FeedForwardInput (values) =>
       require (outputLayerNeurons.size == values.size) //TODO
