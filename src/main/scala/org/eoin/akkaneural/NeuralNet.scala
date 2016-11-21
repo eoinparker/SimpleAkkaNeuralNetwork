@@ -1,8 +1,8 @@
 package org.eoin.akkaneural
 
-import akka.actor.{ActorRef, ActorSystem, Props}
-import spire.math._
+import akka.actor.{ActorSystem, Props}
 import spire.algebra._
+import spire.math._
 
 /**
   * Created by eoin.parker on 11/17/16.
@@ -10,52 +10,59 @@ import spire.algebra._
 object NeuralNet extends App {
 
   val actorSystem = ActorSystem("SimpleAkkaNeuralNetwork")
+
   val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(r))
+
+  val layerSizes = List(3,5,2)  // numLayers = layerSizes.size
 
 
   // the layers of neurons
- val inputLayer = Array.tabulate(3)( i => actorSystem.actorOf(Props(new Neuron(sigmoidActivationFn)), s"inputLayer$i" ))
-  val hiddenLayer = Array.tabulate(5)(i => actorSystem.actorOf(Props(new Neuron(sigmoidActivationFn)), s"hiddenLayer$i" ))
-  val outputLayer = Array.tabulate(2)(i => actorSystem.actorOf(Props(new Neuron(/*identity*/ sigmoidActivationFn)), s"outputLayer$i" )) //TODO identity or sig
+  val layers = layerSizes.zipWithIndex map { case (size,index) =>
+    Array.tabulate(size)( i => actorSystem.actorOf(Props(new Neuron(sigmoidActivationFn)), s"neuronLayer_${index}_${i}" ))
+  }
 
   // the routers between successive pairs of layers.  Job is to collate all previous computes & then broadcast onward
-  val inputLayerToHiddenLayer = actorSystem.actorOf(Props(new InterLayerRouter(2)), "inputLayerToHiddenLayer")
-  val hiddenLayerToOutputLayer = actorSystem.actorOf(Props(new InterLayerRouter(3)), "hiddenLayerToOutputLayer")
-  val outputLayerToExitPoint = actorSystem.actorOf(Props(new InterLayerRouter(4)), "outputLayerToExitPoint")
+  val routersAfterEachLayer =  layers.zipWithIndex map { case (layer,index) =>
+    val router = actorSystem.actorOf(Props(new InterLayerRouter), s"router_downstream_of_layer_${index}")
+    layer foreach { neuron =>   // hook each router to its preceding neurons
+      neuron ! NeuronAdded(router, true)
+      router ! NeuronAdded(neuron, false)
+    }
+    router
+  }
+  routersAfterEachLayer zip layers.tail foreach {
+    case ( router, downstreamLayer) =>
+      downstreamLayer foreach { downstreamNeuron =>  // hook each router to its successive neurons
+        downstreamNeuron ! NeuronAdded(router, true)
+        router ! NeuronAdded(downstreamNeuron, false)
+      }
+  }
 
-  // send a dataset, row by row
+  val inputLayer = layers.head
+  val outputLayer = layers.last
+  val outputRouter = routersAfterEachLayer.last
+
   val entryPoint  = actorSystem.actorOf(Props(new NetworkEntryPoint), "entryPoint")
-  // will await + collate results from output layer
+  inputLayer foreach { n =>
+    n ! NeuronAdded(entryPoint, false)
+    entryPoint ! NeuronAdded(n, true)
+  }
+
   val exitPoint  = actorSystem.actorOf(Props(new NetworkExitPoint), "exitPoint")
+  outputRouter ! NeuronAdded(exitPoint, true)
+  exitPoint ! NeuronAdded(outputRouter, false)
 
 
-  // hook everything up
-  inputLayer foreach { a: ActorRef =>
-    entryPoint ! NeuronAdded(a, true)
-    inputLayerToHiddenLayer ! NeuronAdded(a, false)
-    a ! NeuronAdded(inputLayerToHiddenLayer, true)
-  }
-  hiddenLayer foreach { a: ActorRef =>
-    inputLayerToHiddenLayer ! NeuronAdded(a, true)
-    hiddenLayerToOutputLayer ! NeuronAdded(a, false)
-    a ! NeuronAdded(hiddenLayerToOutputLayer, true)
-  }
-  outputLayer foreach { a: ActorRef =>
-    hiddenLayerToOutputLayer ! NeuronAdded(a, true)
-    outputLayerToExitPoint ! NeuronAdded(a, false)
-    a ! NeuronAdded(outputLayerToExitPoint, true)
-}
-
-  outputLayerToExitPoint ! NeuronAdded(exitPoint, true)
-  exitPoint ! NeuronAdded(outputLayerToExitPoint, false)
-
-  val dummyData = List( Real(0.25), Real(-0.75), Real(0.01), Real(-0.15), Real (0.91456), Real (0.99)).grouped(3)
+  // TODO remove & move to test
+    Thread.sleep(2000) ;
+  import org.eoin.rng
+  val dummyData = List.fill(layerSizes.size * 5){ Real(rng.nextDouble()) }.grouped(layerSizes.size)
 
   dummyData foreach( entryPoint ! FeedForwardInput(_))
 
-  Thread.sleep(1000) ;
+  Thread.sleep(10000) ;
+
 
   actorSystem.terminate()
-
 
 }

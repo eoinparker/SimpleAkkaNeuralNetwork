@@ -5,7 +5,6 @@ import akka.event.LoggingReceive
 import akka.routing.{BroadcastRoutingLogic, Router}
 import spire.implicits._
 import spire.math._
-import spire.random.rng.Cmwc5
 
 sealed trait NeuronMessage
 case class FeedForwardInput(values: List[Real]) extends NeuronMessage
@@ -15,10 +14,9 @@ case class NeuronAdded(ref: ActorRef, downstream: Boolean) extends NeuronMessage
 case class NeuronRemoved(ref: ActorRef) extends NeuronMessage
 
 
-class Neuron ( /*val interLayerRouter: ActorRef, val myIndex: Int, val myLayerIndex : Int, */
-               val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
+class Neuron ( val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
 
-  val rng = Cmwc5()
+  import org.eoin.rng
 
   // TODO vars - change to context.become or FSM
   var biasTerm = Real(0.5)
@@ -45,7 +43,7 @@ class Neuron ( /*val interLayerRouter: ActorRef, val myIndex: Int, val myLayerIn
   }
 }
 
-class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with Stash with ActorLogging {
+class InterLayerRouter extends Actor with Stash with ActorLogging {
 
   var routerToNextLayer = Router(BroadcastRoutingLogic(), Vector.empty) // TODO var
   var previousLayerNeurons = List.empty[ActorRef]
@@ -83,19 +81,18 @@ class NetworkEntryPoint extends Actor with Stash with ActorLogging {
   var inputLayerNeurons = List.empty[ActorRef]
 
   override def receive : Receive =  LoggingReceive {
-    case NeuronAdded(actorRef,true) => inputLayerNeurons = actorRef :: inputLayerNeurons
+    case NeuronAdded(actorRef,true) if ! inputLayerNeurons.contains(actorRef) => inputLayerNeurons = actorRef :: inputLayerNeurons
     case FeedForwardInput (values) =>
       require (inputLayerNeurons.size == values.size) //TODO
       inputLayerNeurons zip values foreach { case (neuron,value) => neuron ! FeedForwardInput(Real(1.0) :: List(value)) }  // 1.0 prepended for the bias term
     case x: Any =>
       log.error(s"NetworkEntryPoint $this unrecognized message $x")
   }
-
 }
 
 class NetworkExitPoint extends Actor with Stash with ActorLogging {
 
-   var outputLayerNeurons = List.empty[ActorRef]
+  var outputLayerNeurons = List.empty[ActorRef]
 
   override def receive : Receive = LoggingReceive {
     case NeuronAdded(actorRef,false) =>
@@ -107,5 +104,4 @@ class NetworkExitPoint extends Actor with Stash with ActorLogging {
      case x: Any =>
       log.error(s"NetworkExitPoint $this unrecognized message $x")
     }
-
 }
