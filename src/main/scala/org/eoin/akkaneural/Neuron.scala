@@ -5,6 +5,7 @@ import akka.event.LoggingReceive
 import akka.routing.{BroadcastRoutingLogic, Router}
 import spire.implicits._
 import spire.math._
+import spire.random.rng.Cmwc5
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -19,36 +20,28 @@ case class NeuronRemoved(ref: ActorRef) extends NeuronMessage
 class Neuron ( val interLayerRouter: ActorRef, /*val myIndex: Int, val myLayerIndex : Int, */
                val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
 
+  val rng = Cmwc5()
+
   // TODO vars - context.become
-  var biasTerm: Real = 1/2
-  var inputWeights = ArrayBuffer(biasTerm) // Map.empty[ActorRef, Real]
-
-  //var routerToNextLayer = Router(BroadcastRoutingLogic(), Vector.empty)
-
+  var biasTerm = Real(0.5)
+  var inputWeights = ArrayBuffer(biasTerm)
 
   override def receive: Receive = LoggingReceive {
 
-    //case NeuronConnected(actorRef) => routerToNextLayer = routerToNextLayer.addRoutee(actorRef)
-    //case NeuronDisconnected(actorRef) => routerToNextLayer = routerToNextLayer.removeRoutee(actorRef)
-
     case FeedForwardInput (values) =>
-      if (values.length > inputWeights.length) {      //expand array if necc, with mean of
-        inputWeights ++= List.fill(values.length - inputWeights.length) (inputWeights.qmean)
+      if (values.length > inputWeights.length ) {      //expand array if necc , with Random /or w mean of existing values //TODO clunky
+        inputWeights ++= List.fill(values.length - inputWeights.length) (rng.next[Double])  // (inputWeights.qmean)
       }
       val dotProduct = values.zip(inputWeights) map { r => r._1 * r._2 }
       val output = activationFn(dotProduct.qsum)
-
       interLayerRouter ! FeedForwardOutput(output)
 
     case BackPropagationInput(delta: Real) => ???
 
     case x: Any =>
-      log.error(s"NetworkEntryPoint $this unrecognized message $x") // TODO which one
-      //logger.error(s"unrecognized message $x")
+      log.error(s"Neuron $this unrecognized message $x")
 
   }
-
-
 }
 
 class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with Stash with ActorLogging {
@@ -57,7 +50,6 @@ class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with St
   var previousLayerNeurons = List.empty[ActorRef]
 
   override def receive = handle(List.empty)
-
 
   def handle(feedForwardOutputsReceived: List[ (ActorRef,Real)] ): Receive = LoggingReceive {
 
@@ -68,18 +60,20 @@ class InterLayerRouter ( val mySuccessiveLayerIndex : Int) extends Actor with St
       previousLayerNeurons = previousLayerNeurons.filterNot { _ == actorRef }
 
     case FeedForwardOutput(value) =>
+      //require(previousLayerNeurons.contains(sender()))
       val allFeedForwards = (sender(),  value) :: feedForwardOutputsReceived
-      // if we've gotten them all, send them on
-      if (allFeedForwards.map {_._1} == previousLayerNeurons) { // TODO bit clunky
-        routerToNextLayer.route(FeedForwardInput(allFeedForwards.map {_._2}), context.self)
+      // if we've gotten an input from all upstream neurons, parcel them up & send them on
+      if (allFeedForwards.map {_._1}.toSet == previousLayerNeurons.toSet) { // TODO bit clunky
+        val allActivations = Real(1.0) :: allFeedForwards.map {_._2}  // 1.0 prepended for the bias term
+        routerToNextLayer.route(FeedForwardInput(allActivations), context.self)
         context.become(handle(List.empty))
       } else {
+        // otherwise store off & keep waiting.
         context.become(handle(allFeedForwards))
       }
 
     case x: Any =>
-      log.error(s"NetworkEntryPoint $this unrecognized message $x") // TODO which one
-      //logger.error(s"unrecognized message $x")  }
+      log.error(s"InterLayerRouter $this unrecognized message $x")
   }
 }
 
@@ -91,10 +85,9 @@ class NetworkEntryPoint extends Actor with Stash with ActorLogging {
     case NeuronAdded(actorRef,true) => inputLayerNeurons = actorRef :: inputLayerNeurons
     case FeedForwardInput (values) =>
       require (inputLayerNeurons.size == values.size) //TODO
-      inputLayerNeurons zip values foreach { case (neuron,value) => neuron ! FeedForwardInput(List(value))}
+      inputLayerNeurons zip values foreach { case (neuron,value) => neuron ! FeedForwardInput(Real(1.0) :: List(value)) }  // 1.0 prepended for the bias term
     case x: Any =>
-      log.error(s"NetworkEntryPoint $this unrecognized message $x") // TODO which one
-      //logger.error(s"unrecognized message $x")
+      log.error(s"NetworkEntryPoint $this unrecognized message $x")
   }
 
 }
@@ -104,13 +97,14 @@ class NetworkExitPoint extends Actor with Stash with ActorLogging {
    var outputLayerNeurons = List.empty[ActorRef]
 
   override def receive : Receive = LoggingReceive {
-    case NeuronAdded(actorRef,false) => outputLayerNeurons = actorRef :: outputLayerNeurons
+    case NeuronAdded(actorRef,false) =>
+      outputLayerNeurons = actorRef :: outputLayerNeurons
+      log.info(s"added ${actorRef} to ${context.self}")
     case f @ FeedForwardInput (values) =>
-      require (outputLayerNeurons.size == values.size) //TODO
-      log.info(f.toString)
+      require (outputLayerNeurons.contains(sender()))
+      log.info(s"FINAL OUTPUT FROM output neuron $sender() ${f.toString}")
      case x: Any =>
-      log.error(s"NetworkEntryPoint $this unrecognized message $x") // TODO which one
-      //logger.error(s"unrecognized message $x")
+      log.error(s"NetworkExitPoint $this unrecognized message $x")
     }
 
 }

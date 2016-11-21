@@ -14,13 +14,14 @@ object NeuralNet extends App {
   val entryPoint  = actorSystem.actorOf(Props(new NetworkEntryPoint), "entryPoint")
   val inputLayerToHiddenLayer = actorSystem.actorOf(Props(new InterLayerRouter(2)), "inputLayerToHiddenLayer")
   val hiddenLayerToOutputLayer = actorSystem.actorOf(Props(new InterLayerRouter(3)), "hiddenLayerToOutputLayer")
+  val outputLayerToExitPoint = actorSystem.actorOf(Props(new InterLayerRouter(4)), "outputLayerToExitPoint")
   val exitPoint  = actorSystem.actorOf(Props(new NetworkExitPoint), "exitPoint")
 
   val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(r))
 
  val inputLayer = Array.tabulate(3)( i => actorSystem.actorOf(Props(new Neuron(inputLayerToHiddenLayer, sigmoidActivationFn)), s"inputLayer$i" ))
   val hiddenLayer = Array.tabulate(5)(i => actorSystem.actorOf(Props(new Neuron(hiddenLayerToOutputLayer, sigmoidActivationFn)), s"hiddenLayer$i" ))
-  val outputLayer = Array.tabulate(2)(i => actorSystem.actorOf(Props(new Neuron(exitPoint, identity)), s"outputLayer$i" ))
+  val outputLayer = Array.tabulate(2)(i => actorSystem.actorOf(Props(new Neuron(outputLayerToExitPoint, identity)), s"outputLayer$i" ))
 
   inputLayer foreach { a: ActorRef =>
     entryPoint ! NeuronAdded(a, true)
@@ -32,14 +33,17 @@ object NeuralNet extends App {
   }
   outputLayer foreach { a: ActorRef =>
     hiddenLayerToOutputLayer ! NeuronAdded(a, true)
-    exitPoint ! NeuronAdded(a, false)
+    outputLayerToExitPoint ! NeuronAdded(a, false)
   }
+
+  outputLayerToExitPoint ! NeuronAdded(exitPoint, true)
+  exitPoint ! NeuronAdded(outputLayerToExitPoint, false)
 
   val dummyData = List( Real(0.25), Real(-0.75), Real(0.01), Real(-0.15), Real (0.91456), Real (0.99)).grouped(3)
 
   dummyData foreach( entryPoint ! FeedForwardInput(_))
 
-  Thread.sleep(100000) ;
+  Thread.sleep(10000) ;
 
   actorSystem.terminate()
 
