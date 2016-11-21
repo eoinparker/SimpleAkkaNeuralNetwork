@@ -7,8 +7,6 @@ import spire.implicits._
 import spire.math._
 import spire.random.rng.Cmwc5
 
-import scala.collection.mutable.ArrayBuffer
-
 sealed trait NeuronMessage
 case class FeedForwardInput(values: List[Real]) extends NeuronMessage
 case class FeedForwardOutput(value: Real) extends NeuronMessage
@@ -17,24 +15,27 @@ case class NeuronAdded(ref: ActorRef, downstream: Boolean) extends NeuronMessage
 case class NeuronRemoved(ref: ActorRef) extends NeuronMessage
 
 
-class Neuron ( val interLayerRouter: ActorRef, /*val myIndex: Int, val myLayerIndex : Int, */
+class Neuron ( /*val interLayerRouter: ActorRef, val myIndex: Int, val myLayerIndex : Int, */
                val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
 
   val rng = Cmwc5()
 
-  // TODO vars - context.become
+  // TODO vars - change to context.become or FSM
   var biasTerm = Real(0.5)
-  var inputWeights = ArrayBuffer(biasTerm)
+  var inputWeights = Array(biasTerm)
+  var outputDestinationNeurons = List.empty[ActorRef]
 
   override def receive: Receive = LoggingReceive {
 
+    case NeuronAdded(actorRef,true) => outputDestinationNeurons = actorRef :: outputDestinationNeurons
+
     case FeedForwardInput (values) =>
       if (values.length > inputWeights.length ) {      //expand array if necc , with Random /or w mean of existing values //TODO clunky
-        inputWeights ++= List.fill(values.length - inputWeights.length) (rng.next[Double])  // (inputWeights.qmean)
+        inputWeights = inputWeights ++ Array.fill(values.length - inputWeights.length) (Real(rng.next[Double]))  // (inputWeights.qmean)
       }
       val dotProduct = values.zip(inputWeights) map { r => r._1 * r._2 }
       val output = activationFn(dotProduct.qsum)
-      interLayerRouter ! FeedForwardOutput(output)
+      outputDestinationNeurons foreach { _ ! FeedForwardOutput(output) }
 
     case BackPropagationInput(delta: Real) => ???
 
