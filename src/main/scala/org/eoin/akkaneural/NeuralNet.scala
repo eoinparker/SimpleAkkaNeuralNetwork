@@ -7,34 +7,34 @@ import spire.math._
 /**
   * Created by eoin.parker on 11/17/16.
   */
-object NeuralNet extends App {
 
-  val actorSystem = ActorSystem("SimpleAkkaNeuralNetwork")
 
-  val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(r))
-
-  val layerSizes = List(3,5,2)  // numLayers = layerSizes.size
-
+class NeuralNet(val layerSizes: List[Int], val actorSystemName: String) {//
+val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(r))
+  val actorSystem = ActorSystem(actorSystemName)
+  val dataRowSize = layerSizes.head
 
   // the layers of neurons
   val layers = layerSizes.zipWithIndex map { case (size,index) =>
     Array.tabulate(size)( i => actorSystem.actorOf(Props(new Neuron(sigmoidActivationFn)), s"neuronLayer_${index}_${i}" ))
   }
 
-  // the routers between successive pairs of layers.  Job is to collate all previous computes & then broadcast onward
+  // the routers between successive pairs of layers.  Router's job is to collate all previous computes & then broadcast onward
   val routersAfterEachLayer =  layers.zipWithIndex map { case (layer,index) =>
     val router = actorSystem.actorOf(Props(new InterLayerRouter), s"router_downstream_of_layer_${index}")
-    layer foreach { neuron =>   // hook each router to its preceding neurons
+    // hook each router to its preceding neurons
+    layer foreach { neuron =>
       neuron ! NeuronAdded(router, true)
       router ! NeuronAdded(neuron, false)
     }
     router
   }
+  // And also hook each router to its successive neurons
   routersAfterEachLayer zip layers.tail foreach {
     case ( router, downstreamLayer) =>
-      downstreamLayer foreach { downstreamNeuron =>  // hook each router to its successive neurons
-        downstreamNeuron ! NeuronAdded(router, true)
-        router ! NeuronAdded(downstreamNeuron, false)
+      downstreamLayer foreach { downstreamNeuron =>
+        downstreamNeuron ! NeuronAdded(router, false)
+        router ! NeuronAdded(downstreamNeuron, true)
       }
   }
 
@@ -52,17 +52,10 @@ object NeuralNet extends App {
   outputRouter ! NeuronAdded(exitPoint, true)
   exitPoint ! NeuronAdded(outputRouter, false)
 
+}
 
-  // TODO remove & move to test
-    Thread.sleep(2000) ;
-  import org.eoin.rng
-  val dummyData = List.fill(layerSizes.size * 5){ Real(rng.nextDouble()) }.grouped(layerSizes.size)
+object NeuralNet extends App {
 
-  dummyData foreach( entryPoint ! FeedForwardInput(_))
-
-  Thread.sleep(10000) ;
-
-
-  actorSystem.terminate()
+  val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(r))
 
 }
