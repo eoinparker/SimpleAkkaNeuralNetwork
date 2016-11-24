@@ -13,3 +13,4 @@ package object eoin {
   type LoggingToUse = DiagnosticActorLogging
 
 }
+ 

@@ -87,3 +87,4 @@ class NeuralNet(val layerSizes: List[Int], val datasetNumRows: Int, val actorSys
 
 }
 
+ 
