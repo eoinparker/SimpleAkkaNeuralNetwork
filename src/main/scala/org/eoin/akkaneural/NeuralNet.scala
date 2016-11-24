@@ -9,6 +9,17 @@ import spire.random.rng.Cmwc5
   * Created by eoin.parker on 11/17/16.
   */
 
+
+object NeuralNet extends App {
+
+  // TODO supervision - restart with state - must retain the weights
+  // TODO dispatchers
+  // TODO reactive + backpressure.  routers still blocking
+
+}
+
+
+
 trait InjectableConfig {
   // want to inject dummy functions so can test against known outputs
   def getRealNumberRNG : () => Real
@@ -76,8 +87,3 @@ class NeuralNet(val layerSizes: List[Int], val datasetNumRows: Int, val actorSys
 
 }
 
-object NeuralNet extends App {
-
-  //val sigmoidActivationFn = (r:Real) => 1 / (1 + Trig[Real].exp(-r))
-
-}
