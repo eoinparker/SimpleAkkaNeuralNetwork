@@ -14,12 +14,10 @@ case class FeedForwardOutput(value: Real) extends NeuronMessage
 case class BackPropagationInput(delta: Real) extends NeuronMessage
 case class NeuronAdded(ref: ActorRef, downstream: Boolean) extends NeuronMessage
 case class NeuronRemoved(ref: ActorRef) extends NeuronMessage
-case object GetState // for testing
+case object BeginBackPropagation
 
 
-class Neuron ( val activationFn: Real=>Real) extends Actor with Stash with ActorLogging {
-
-  import org.eoin.rng
+class Neuron (val realNumberRNG: ()=>Real,  val activationFn: Real => Real ) extends Actor with Stash with ActorLogging {
 
   // TODO vars - change to context.become or FSM
   var biasTerm = Real(0.5)
@@ -37,7 +35,7 @@ class Neuron ( val activationFn: Real=>Real) extends Actor with Stash with Actor
     case FeedForwardInput (values) =>
       if (values.length > inputWeights.length ) {
         //expand array if necc , with Random /or w mean of existing values //TODO clunky
-        inputWeights = inputWeights ++ Array.fill(values.length - inputWeights.length) (Real(rng.next[Double]))  // (inputWeights.qmean)
+        inputWeights = inputWeights ++ Array.fill(values.length - inputWeights.length) (realNumberRNG())  // (inputWeights.qmean)
       }
       val dotProduct = values.zip(inputWeights) map { r => r._1 * r._2 }
       val output = activationFn(dotProduct.qsum)
@@ -70,11 +68,17 @@ class InterLayerRouter extends Actor with Stash with ActorLogging {
     case FeedForwardOutput(value) =>
       require(previousLayerNeurons.contains(sender()))
       val allFeedForwards = (sender(),  value) :: feedForwardOutputsReceived
+
       // if we've gotten an input from all upstream neurons, parcel them up & send them on
-      if (allFeedForwards.map {_._1}.toSet == previousLayerNeurons.toSet) { // TODO bit clunky
-        val allActivations = Real(1.0) :: allFeedForwards.map {_._2}  // 1.0 prepended for the bias term
+      // TODO bit clunky but there may be multiple messages from the same neuron in feedForwardOutputsReceived
+      // And we only want the oldest from each neuron.
+      val oldestFromEachNeuron = allFeedForwards.foldRight(ListBuffer.empty[(ActorRef,Real)]) {
+        (tuple, list) => if (! (list exists { case (a,b) => a == tuple._1 } )) list += tuple else list }
+
+      if (oldestFromEachNeuron.size == previousLayerNeurons.size) { // have gotten a value from every upstream neuron. Good to go with downstream transmit
+        val allActivations = Real(1.0) :: oldestFromEachNeuron.map {_._2}.toList  // 1.0 prepended for the bias term
         routerToNextLayer.route(FeedForwardInput(allActivations), context.self)
-        context.become(handle(List.empty))
+        context.become( handle(allFeedForwards.dropWhile { oldestFromEachNeuron contains _ } ) )
       } else {
         // otherwise store off & keep waiting.
         context.become(handle(allFeedForwards))
@@ -106,11 +110,10 @@ class NetworkEntryPoint extends Actor with Stash with ActorLogging {
   }
 }
 
-class NetworkExitPoint extends Actor with Stash with ActorLogging {
+class NetworkExitPoint( val expectedNumRows : Int)  extends Actor with Stash with ActorLogging {
 
-  var outputLayerNeurons = List.empty[ActorRef]
-
-  val feedForwardOutputsReceived = ListBuffer[(ActorRef, FeedForwardInput)] ()
+  var outputLayerNeurons = List.empty[ActorRef]  //TODO vars
+  val feedForwardInputsReceived = ListBuffer[(ActorRef, FeedForwardInput)] ()
 
   override def receive : Receive = LoggingReceive {
     case NeuronAdded(actorRef,false) =>
@@ -119,10 +122,15 @@ class NetworkExitPoint extends Actor with Stash with ActorLogging {
       throw new IllegalArgumentException (s"{$sender()} is trying to add downstream of the network's exitpoint ${context.self}")
     case ffi @ FeedForwardInput (values) =>
       require (outputLayerNeurons.contains(sender()))
-      log.info(s"FINAL OUTPUT FROM output neuron $sender() ${ffi.toString}")
-      feedForwardOutputsReceived += ((sender(), ffi))
-    case GetState =>
-      sender() ! feedForwardOutputsReceived
+      log.debug(s"FINAL OUTPUT FROM output neuron $sender() ${ffi.toString}")
+      feedForwardInputsReceived += ((sender(), ffi))
+      if (expectedNumRows == feedForwardInputsReceived.size)
+        self ! BeginBackPropagation
+
+    case BeginBackPropagation =>
+        // http://neuralnetworksanddeeplearning.com/chap2.html#the_backpropagation_algorithm
+      //val outputError = _
+
 
     case x: Any =>
       log.error(s"NetworkExitPoint $this unrecognized message $x")

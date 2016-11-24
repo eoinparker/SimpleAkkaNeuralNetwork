@@ -1,18 +1,26 @@
 package org.eoin.akkaneural
 
-import akka.testkit.TestProbe
+import java.util.{Random => JRandom}
+
+import akka.actor.Props
+import akka.testkit.{TestActorRef, TestKit}
 import org.eoin._
-import org.junit.Test
+import org.junit.{Ignore, Test}
 import org.scalacheck.Gen
 import org.scalatest.Matchers._
 import org.scalatest.junit.JUnitSuite
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import spire.math.Real
 
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 
-class ProjectUnitTestSuite1 extends JUnitSuite with GeneratorDrivenPropertyChecks {
+
+trait TestConfig extends InjectableConfig {
+  override def getRealNumberRNG: () => Real = () => 0.5
+  override def getActivationFunction: (Real) => Real = identity[Real]
+}
+
+class ProjectUnitTestSuite1 extends JUnitSuite with GeneratorDrivenPropertyChecks with TestConfig{
 
   @Test def testHelloWorld : Unit = {
 
@@ -22,37 +30,59 @@ class ProjectUnitTestSuite1 extends JUnitSuite with GeneratorDrivenPropertyCheck
     }
   }
 
-  @Test def testCorrectOutputSize : Unit = {
+  //manual re running
+  @Ignore @Test def testProblemCases : Unit = {
+
+    performRun(List(7, 1, 7, 8, 8, 9, 7, 3, 6, 4, 7) ,20 )
+
+  }
+
+
+
+  @Test def testCorrectOutputs : Unit = {
 
     val layerSizesGenerator: Gen[List[Int]] = for {
-      inputLayerSize <- Gen.choose[Int](1,4)
-      hiddenLayerSizes <- Gen.containerOf[List, Int](Gen.choose(1,10))
-      outputLayerSize <- Gen.choose[Int](1,5)
+      inputLayerSize <- Gen.choose[Int](1,50)
+      hiddenLayerSizes <- Gen.containerOf[List, Int](Gen.choose(1,100))
+      outputLayerSize <- Gen.choose[Int](1,50)
     } yield (inputLayerSize :: hiddenLayerSizes) :+ outputLayerSize
 
-    //val random0to1RealGenerator = //TODO
-
-    forAll (layerSizesGenerator, minSize(10)) { (layerSizes : List[Int]) =>
+    forAll (layerSizesGenerator,minSuccessful(10)) { (layerSizes : List[Int]) =>
       whenever (layerSizes.length > 1 && ! layerSizes.exists( _ <= 0)) {
 
-        logger.info(s" *** layerSizes : ${layerSizes}")
-        val neuralNet = new NeuralNet(layerSizes, "TestNeuralNetwork")
+        performRun(layerSizes, 200)
 
-        import org.eoin.rng
-        val numRowsOfData = 20
-        val dummyData = List.fill(neuralNet.dataRowSize * numRowsOfData){ Real(rng.nextDouble()) }.grouped(neuralNet.dataRowSize)
-        dummyData foreach( neuralNet.entryPoint ! FeedForwardInput(_))
-        Thread.sleep(3000) ;
-
-        val probe = TestProbe()(neuralNet.actorSystem)
-        neuralNet.actorSystem.actorSelection("akka://SimpleAkkaNeuralNetwork/user/exitPoint") ! (GetState, probe)
-        val stateMsg = probe.fishForMessage(60000 millis, "GetState") { case (lbff: ListBuffer[FeedForwardInput]) => true }
-
-        stateMsg.asInstanceOf[ListBuffer[FeedForwardInput]].size should equal(layerSizes.last)
-
-        neuralNet.actorSystem.terminate()
       }
     }
+  }
+
+
+  private def performRun(layerSizes: List[Int], numRowsOfData : Int) : Unit = {
+      logger.info(s" *** performRun layerSizes : ${layerSizes} numRowsOfData : ${numRowsOfData}")
+
+      val neuralNet = new NeuralNet(layerSizes,
+        numRowsOfData, "TestNeuralNetwork") with TestConfig
+
+      val testActor = TestActorRef(Props(new NetworkExitPoint(numRowsOfData))) (neuralNet.actorSystem)
+      neuralNet.outputRouter ! NeuronAdded(testActor, true)
+      testActor ! NeuronAdded(neuralNet.outputRouter, false)
+
+      val rng = new JRandom
+      val dummyData = List.fill(neuralNet.dataRowSize * numRowsOfData){ Real(rng.nextDouble()) }
+        .grouped(neuralNet.dataRowSize)
+
+      dummyData foreach { neuralNet.entryPoint ! FeedForwardInput(_) }
+
+      val outputData = testActor.underlyingActor.asInstanceOf[NetworkExitPoint].feedForwardInputsReceived
+      TestKit.awaitCond (outputData.size == numRowsOfData, 60 seconds)
+
+      val outputLayerSize = neuralNet.outputLayer.length
+      outputData foreach { case(_,ffi:FeedForwardInput) =>
+        ffi.values.length should equal(outputLayerSize + 1)} // +1 cos the bias term is included
+      logger.info(s"\n\n *** outputData : ${outputData}\n\n")
+
+      neuralNet.actorSystem.terminate()
+
   }
 
 
